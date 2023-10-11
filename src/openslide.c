@@ -42,9 +42,7 @@ static const char * const EMPTY_STRING_ARRAY[] = { NULL };
 static const struct _openslide_format *formats[] = {
   &_openslide_format_synthetic,
   &_openslide_format_mirax,
-#ifdef HAVE_LIBDICOM
   &_openslide_format_dicom,
-#endif
   &_openslide_format_hamamatsu_vms_vmu,
   &_openslide_format_hamamatsu_ndpi,
   &_openslide_format_sakura,
@@ -282,6 +280,11 @@ openslide_t *openslide_open(const char *filename) {
   g_hash_table_insert(osr->properties,
                       g_strdup(OPENSLIDE_PROPERTY_NAME_VENDOR),
                       g_strdup(format->vendor));
+  if (osr->icc_profile_size) {
+    g_hash_table_insert(osr->properties,
+                        g_strdup(OPENSLIDE_PROPERTY_NAME_ICC_SIZE),
+                        g_strdup_printf("%"PRId64, osr->icc_profile_size));
+  }
   g_hash_table_insert(osr->properties,
 		      g_strdup(_OPENSLIDE_PROPERTY_NAME_LEVEL_COUNT),
 		      g_strdup_printf("%d", osr->level_count));
@@ -317,8 +320,25 @@ openslide_t *openslide_open(const char *filename) {
     }
   }
 
-  // fill in names
+  // fill in associated image names and set properties
   osr->associated_image_names = strv_from_hashtable_keys(osr->associated_images);
+  for (const char **name = osr->associated_image_names; *name != NULL; name++) {
+    struct _openslide_associated_image *img =
+      g_hash_table_lookup(osr->associated_images, *name);
+    g_hash_table_insert(osr->properties,
+			g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_ASSOCIATED_WIDTH, *name),
+			g_strdup_printf("%"PRId64, img->w));
+    g_hash_table_insert(osr->properties,
+			g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_ASSOCIATED_HEIGHT, *name),
+			g_strdup_printf("%"PRId64, img->h));
+    if (img->icc_profile_size) {
+      g_hash_table_insert(osr->properties,
+                          g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_ASSOCIATED_ICC_SIZE, *name),
+                          g_strdup_printf("%"PRId64, img->icc_profile_size));
+    }
+  }
+
+  // fill in property names
   osr->property_names = strv_from_hashtable_keys(osr->properties);
 
   // start cache
@@ -434,6 +454,9 @@ static bool read_region_area(openslide_t *osr,
   // create the cairo context
   g_autoptr(cairo_t) cr = cairo_create(surface);
 
+  // saturate those seams away!
+  cairo_set_operator(cr, CAIRO_OPERATOR_SATURATE);
+
   if (level_in_range(osr, level)) {
     struct _openslide_level *l = osr->levels[level];
 
@@ -541,6 +564,31 @@ const char *openslide_get_property_value(openslide_t *osr, const char *name) {
   return g_hash_table_lookup(osr->properties, name);
 }
 
+int64_t openslide_get_icc_profile_size(openslide_t *osr) {
+  if (openslide_get_error(osr)) {
+    return -1;
+  }
+
+  return osr->icc_profile_size;
+}
+
+void openslide_read_icc_profile(openslide_t *osr, void *dest) {
+  if (openslide_get_error(osr)) {
+    memset(dest, 0, osr->icc_profile_size);
+    return;
+  }
+  if (!osr->icc_profile_size) {
+    return;
+  }
+  g_assert(osr->ops->read_icc_profile);
+
+  GError *tmp_err = NULL;
+  if (!osr->ops->read_icc_profile(osr, dest, &tmp_err)) {
+    _openslide_propagate_error(osr, tmp_err);
+    memset(dest, 0, osr->icc_profile_size);
+  }
+}
+
 const char * const *openslide_get_associated_image_names(openslide_t *osr) {
   if (openslide_get_error(osr)) {
     return EMPTY_STRING_ARRAY;
@@ -569,28 +617,62 @@ void openslide_get_associated_image_dimensions(openslide_t *osr, const char *nam
 void openslide_read_associated_image(openslide_t *osr,
 				     const char *name,
 				     uint32_t *dest) {
+  struct _openslide_associated_image *img =
+    g_hash_table_lookup(osr->associated_images, name);
+  if (!img) {
+    return;
+  }
+  size_t pixels = img->w * img->h;
+
   if (openslide_get_error(osr)) {
+    memset(dest, 0, pixels * sizeof(uint32_t));
     return;
   }
 
-  struct _openslide_associated_image *img = g_hash_table_lookup(osr->associated_images,
-								name);
-  if (img) {
-    size_t pixels = img->w * img->h;
-    g_autofree uint32_t *tmp_buf = NULL;
-    if (!dest) {
-      // undocumented special case for testing
-      tmp_buf = g_new(uint32_t, pixels);
-    }
+  GError *tmp_err = NULL;
+  if (!img->ops->get_argb_data(img, dest, &tmp_err)) {
+    _openslide_propagate_error(osr, tmp_err);
+    // ensure we don't return a partial result
+    memset(dest, 0, pixels * sizeof(uint32_t));
+  }
+}
 
-    GError *tmp_err = NULL;
-    if (!img->ops->get_argb_data(img, dest ? dest : tmp_buf, &tmp_err)) {
-      _openslide_propagate_error(osr, tmp_err);
-      if (dest) {
-        // ensure we don't return a partial result
-        memset(dest, 0, pixels * sizeof(uint32_t));
-      }
-    }
+int64_t openslide_get_associated_image_icc_profile_size(openslide_t *osr,
+                                                        const char *name) {
+  if (openslide_get_error(osr)) {
+    return -1;
+  }
+
+  struct _openslide_associated_image *img =
+    g_hash_table_lookup(osr->associated_images, name);
+  if (!img) {
+    return -1;
+  }
+  return img->icc_profile_size;
+}
+
+void openslide_read_associated_image_icc_profile(openslide_t *osr,
+                                                 const char *name,
+                                                 void *dest) {
+  struct _openslide_associated_image *img =
+    g_hash_table_lookup(osr->associated_images, name);
+  if (!img) {
+    return;
+  }
+
+  if (openslide_get_error(osr)) {
+    memset(dest, 0, img->icc_profile_size);
+    return;
+  }
+  if (!img->icc_profile_size) {
+    return;
+  }
+  g_assert(img->ops->read_icc_profile);
+
+  GError *tmp_err = NULL;
+  if (!img->ops->read_icc_profile(img, dest, &tmp_err)) {
+    _openslide_propagate_error(osr, tmp_err);
+    memset(dest, 0, img->icc_profile_size);
   }
 }
 

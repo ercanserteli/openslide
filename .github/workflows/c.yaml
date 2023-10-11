@@ -30,8 +30,10 @@ jobs:
           - os: ubuntu-latest
             container: quay.io/centos/centos:stream9
           - os: ubuntu-latest
-            container: debian:stable
+            container: debian:11
             ignore-cloexec-leaks: ignore CLOEXEC leaks
+          - os: ubuntu-latest
+            container: debian:12
           - os: ubuntu-20.04
             ignore-cloexec-leaks: ignore CLOEXEC leaks
           - os: ubuntu-22.04
@@ -61,8 +63,7 @@ jobs:
                 sqlite \
                 cairo \
                 glib \
-                xdelta \
-                doxygen
+                xdelta
             python3 -m pip install --upgrade pip
             python3 -m pip install requests PyYAML
             ;;
@@ -75,8 +76,6 @@ jobs:
                 8)
                     dnf install -y 'dnf-command(config-manager)'
                     dnf config-manager --set-enabled powertools
-                    # https://bugzilla.redhat.com/show_bug.cgi?id=2124013
-                    dnf copr enable -y bgilbert/el8-pixman-openslide
                     pyver=38
                     pydotver=3.8
                     python=python38
@@ -87,7 +86,7 @@ jobs:
                     dnf install -y epel-release epel-next-release
                     ;;
                 *)
-                    extra="git-core clang llvm valgrind valgrind-devel"
+                    extra="git-core clang doxygen llvm valgrind valgrind-devel"
                     extra="$extra dnf-plugins-core"
                     debuginfo=1
                     ;;
@@ -107,7 +106,6 @@ jobs:
                     sqlite-devel \
                     cairo-devel \
                     glib2-devel \
-                    doxygen \
                     xdelta libjpeg-turbo-utils $extra
 
                 if [ -n "$debuginfo" ]; then
@@ -140,13 +138,12 @@ jobs:
                     libsqlite3-dev \
                     libcairo2-dev \
                     libglib2.0-dev \
-                    doxygen \
                     xdelta3 libjpeg-turbo-progs
                 ;;
             esac
         esac
     - name: Check out repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Check for uninitialized g_auto variables
       if: matrix.extra
       run: |
@@ -233,8 +230,12 @@ jobs:
     name: Set up Windows build
     runs-on: ubuntu-latest
     outputs:
+      builder_repo_and_digest: ${{ steps.find.outputs.builder_repo_and_digest }}
       pkgver: ${{ steps.params.outputs.pkgver }}
     steps:
+      - name: Find builder container digest
+        id: find
+        uses: openslide/openslide-winbuild/.github/find-container-digest@main
       - name: Calculate parameters
         id: params
         run: |
@@ -255,6 +256,7 @@ jobs:
     needs: windows_setup
     uses: openslide/openslide-winbuild/.github/workflows/windows.yml@main
     with:
+      builder_repo_and_digest: ${{ needs.windows_setup.outputs.builder_repo_and_digest }}
       openslide_repo: ${{ github.repository }}
       openslide_ref: ${{ github.ref }}
       pkgver: ${{ needs.windows_setup.outputs.pkgver }}

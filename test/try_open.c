@@ -119,15 +119,16 @@ static void check_api_failures(openslide_t *osr) {
   CHECK_EMPTY_PTR_ARRAY(openslide_get_property_names(osr));
   CHECK_RET(openslide_get_property_value(osr, OPENSLIDE_PROPERTY_NAME_VENDOR),
             NULL);
+  CHECK_RET(openslide_get_icc_profile_size(osr), -1);
   CHECK_EMPTY_PTR_ARRAY(openslide_get_associated_image_names(osr));
   CHECK_W_H(openslide_get_associated_image_dimensions(osr, "label", &w, &h),
             -1, -1);
   CHECK_W_H(openslide_get_associated_image_dimensions(osr, "macro", &w, &h),
             -1, -1);
+  CHECK_RET(openslide_get_associated_image_icc_profile_size(osr, "label"), -1);
+  CHECK_RET(openslide_get_associated_image_icc_profile_size(osr, "macro"), -1);
 
   openslide_read_region(osr, NULL, 0, 0, 0, 10, 10);
-  openslide_read_associated_image(osr, "label", NULL);
-  openslide_read_associated_image(osr, "macro", NULL);
 }
 
 static void check_props(openslide_t *osr) {

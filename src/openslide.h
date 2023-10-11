@@ -35,6 +35,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -178,6 +179,10 @@ int32_t openslide_get_best_level_for_downsample(openslide_t *osr,
  * bytes in length. If an error occurs or has occurred, then the memory
  * pointed to by @p dest will be cleared.
  *
+ * The returned pixel data is in device color space.  The slide's ICC color
+ * profile, if available, can be read with openslide_read_icc_profile() and
+ * used to transform the pixels for display.
+ *
  * For more information about processing pre-multiplied pixel data, see
  * the [OpenSlide website](https://openslide.org/docs/premultiplied-argb/).
  *
@@ -195,6 +200,35 @@ void openslide_read_region(openslide_t *osr,
 			   int64_t x, int64_t y,
 			   int32_t level,
 			   int64_t w, int64_t h);
+
+
+/**
+ * Get the size in bytes of the ICC color profile for the whole slide image.
+ *
+ * @param osr The OpenSlide object.
+ * @return -1 on error, 0 if no profile is available, otherwise the profile
+ * size in bytes.
+ */
+OPENSLIDE_PUBLIC()
+int64_t openslide_get_icc_profile_size(openslide_t *osr);
+
+
+/**
+ * Copy the ICC color profile from a whole slide image.
+ *
+ * This function reads the ICC color profile from the slide into the specified
+ * memory location.  @p dest must be a valid pointer to enough memory
+ * to hold the profile.  Get the profile size with
+ * openslide_get_icc_profile_size().
+ *
+ * If an error occurs or has occurred, then the memory pointed to by @p dest
+ * will be cleared.
+ *
+ * @param osr The OpenSlide object.
+ * @param dest The destination buffer for the ICC color profile.
+ */
+OPENSLIDE_PUBLIC()
+void openslide_read_icc_profile(openslide_t *osr, void *dest);
 
 
 /**
@@ -260,27 +294,6 @@ const char *openslide_get_error(openslide_t *osr);
 //@{
 
 /**
- * The name of the property containing a slide's comment, if any.
- *
- * @since 3.0.0
- */
-#define OPENSLIDE_PROPERTY_NAME_COMMENT "openslide.comment"
-
-/**
- * The name of the property containing an identification of the vendor.
- *
- * @since 3.0.0
- */
-#define OPENSLIDE_PROPERTY_NAME_VENDOR "openslide.vendor"
-
-/**
- * The name of the property containing the "quickhash-1" sum.
- *
- * @since 3.0.0
- */
-#define OPENSLIDE_PROPERTY_NAME_QUICKHASH1 "openslide.quickhash-1"
-
-/**
  * The name of the property containing a slide's background color, if any.
  * It is represented as an RGB hex triplet.
  *
@@ -289,27 +302,20 @@ const char *openslide_get_error(openslide_t *osr);
 #define OPENSLIDE_PROPERTY_NAME_BACKGROUND_COLOR "openslide.background-color"
 
 /**
- * The name of the property containing a slide's objective power, if known.
+ * The name of the property containing the height of the rectangle bounding
+ * the non-empty region of the slide, if available.
  *
- * @since 3.3.0
+ * @since 3.4.0
  */
-#define OPENSLIDE_PROPERTY_NAME_OBJECTIVE_POWER "openslide.objective-power"
+#define OPENSLIDE_PROPERTY_NAME_BOUNDS_HEIGHT "openslide.bounds-height"
 
 /**
- * The name of the property containing the number of microns per pixel in
- * the X dimension of level 0, if known.
+ * The name of the property containing the width of the rectangle bounding
+ * the non-empty region of the slide, if available.
  *
- * @since 3.3.0
+ * @since 3.4.0
  */
-#define OPENSLIDE_PROPERTY_NAME_MPP_X "openslide.mpp-x"
-
-/**
- * The name of the property containing the number of microns per pixel in
- * the Y dimension of level 0, if known.
- *
- * @since 3.3.0
- */
-#define OPENSLIDE_PROPERTY_NAME_MPP_Y "openslide.mpp-y"
+#define OPENSLIDE_PROPERTY_NAME_BOUNDS_WIDTH "openslide.bounds-width"
 
 /**
  * The name of the property containing the X coordinate of the rectangle
@@ -328,20 +334,57 @@ const char *openslide_get_error(openslide_t *osr);
 #define OPENSLIDE_PROPERTY_NAME_BOUNDS_Y "openslide.bounds-y"
 
 /**
- * The name of the property containing the width of the rectangle bounding
- * the non-empty region of the slide, if available.
+ * The name of the property containing a slide's comment, if any.
  *
- * @since 3.4.0
+ * @since 3.0.0
  */
-#define OPENSLIDE_PROPERTY_NAME_BOUNDS_WIDTH "openslide.bounds-width"
+#define OPENSLIDE_PROPERTY_NAME_COMMENT "openslide.comment"
 
 /**
- * The name of the property containing the height of the rectangle bounding
- * the non-empty region of the slide, if available.
+ * The name of the property containing the size of a slide's ICC color profile,
+ * if any.
  *
- * @since 3.4.0
+ * @since 4.0.0
  */
-#define OPENSLIDE_PROPERTY_NAME_BOUNDS_HEIGHT "openslide.bounds-height"
+#define OPENSLIDE_PROPERTY_NAME_ICC_SIZE "openslide.icc-size"
+
+/**
+ * The name of the property containing the number of microns per pixel in
+ * the X dimension of level 0, if known.
+ *
+ * @since 3.3.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_MPP_X "openslide.mpp-x"
+
+/**
+ * The name of the property containing the number of microns per pixel in
+ * the Y dimension of level 0, if known.
+ *
+ * @since 3.3.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_MPP_Y "openslide.mpp-y"
+
+/**
+ * The name of the property containing a slide's objective power, if known.
+ *
+ * @since 3.3.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_OBJECTIVE_POWER "openslide.objective-power"
+
+/**
+ * The name of the property containing the "quickhash-1" sum.
+ *
+ * @since 3.0.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_QUICKHASH1 "openslide.quickhash-1"
+
+/**
+ * The name of the property containing an identification of the vendor.
+ *
+ * @since 3.0.0
+ */
+#define OPENSLIDE_PROPERTY_NAME_VENDOR "openslide.vendor"
+
 //@}
 
 /**
@@ -372,7 +415,6 @@ const char *openslide_get_error(openslide_t *osr);
  */
 OPENSLIDE_PUBLIC()
 const char * const *openslide_get_property_names(openslide_t *osr);
-
 
 /**
  * Get the value of a single property.
@@ -446,18 +488,60 @@ void openslide_get_associated_image_dimensions(openslide_t *osr,
  * will be cleared. In versions prior to 4.0.0, this function did nothing
  * if an error occurred.
  *
+ * The returned pixel data is in device color space.  The associated image's
+ * ICC color profile, if available, can be read with
+ * openslide_read_associated_image_icc_profile() and used to transform the
+ * pixels for display.
+ *
  * For more information about processing pre-multiplied pixel data, see
  * the [OpenSlide website](https://openslide.org/docs/premultiplied-argb/).
  *
  * @param osr The OpenSlide object.
- * @param dest The destination buffer for the ARGB data.
  * @param name The name of the desired associated image. Must be
  *             a valid name as given by openslide_get_associated_image_names().
+ * @param dest The destination buffer for the ARGB data.
  */
 OPENSLIDE_PUBLIC()
 void openslide_read_associated_image(openslide_t *osr,
 				     const char *name,
 				     uint32_t *dest);
+
+
+/**
+ * Get the size in bytes of the ICC color profile for an associated image.
+ *
+ * @param osr The OpenSlide object.
+ * @param name The name of the desired associated image. Must be
+ *             a valid name as given by openslide_get_associated_image_names().
+ * @return -1 on error, 0 if no profile is available, otherwise the profile
+ * size in bytes.
+ */
+OPENSLIDE_PUBLIC()
+int64_t openslide_get_associated_image_icc_profile_size(openslide_t *osr,
+                                                        const char *name);
+
+
+/**
+ * Copy the ICC color profile from an associated image.
+ *
+ * This function reads the ICC color profile from an associated image into
+ * the specified memory location.  @p dest must be a valid pointer to enough
+ * memory to hold the profile.  Get the profile size with
+ * openslide_get_associated_image_icc_profile_size().
+ *
+ * If an error occurs or has occurred, then the memory pointed to by @p dest
+ * will be cleared.
+ *
+ * @param osr The OpenSlide object.
+ * @param name The name of the desired associated image. Must be
+ *             a valid name as given by openslide_get_associated_image_names().
+ * @param dest The destination buffer for the ICC color profile.
+ */
+OPENSLIDE_PUBLIC()
+void openslide_read_associated_image_icc_profile(openslide_t *osr,
+                                                 const char *name,
+                                                 void *dest);
+
 //@}
 
 /**
