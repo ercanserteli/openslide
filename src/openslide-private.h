@@ -42,6 +42,9 @@ struct _openslide_associated_image {
 
   int64_t w;
   int64_t h;
+
+  // the size in bytes of the ICC profile, or 0 for no profile available
+  int64_t icc_profile_size;
 };
 
 /* associated image operations */
@@ -50,6 +53,9 @@ struct _openslide_associated_image_ops {
   bool (*get_argb_data)(struct _openslide_associated_image *img,
                         uint32_t *dest,
                         GError **err);
+  // must fail if img->icc_profile_size doesn't match the profile
+  bool (*read_icc_profile)(struct _openslide_associated_image *img,
+                           void *dest, GError **err);
   void (*destroy)(struct _openslide_associated_image *img);
 };
 
@@ -67,6 +73,9 @@ struct _openslide {
   // metadata
   GHashTable *properties; // created automatically
   const char **property_names; // filled in automatically from hashtable
+
+  // the size in bytes of the ICC profile, or 0 for no profile available
+  int64_t icc_profile_size;
 
   // cache
   struct _openslide_cache_binding *cache;
@@ -90,10 +99,12 @@ struct _openslide_level {
 /* the function pointer structure for backends */
 struct _openslide_ops {
   bool (*paint_region)(openslide_t *osr, cairo_t *cr,
-		       int64_t x, int64_t y,
-		       struct _openslide_level *level,
-		       int32_t w, int32_t h,
-		       GError **err);
+                       int64_t x, int64_t y,
+                       struct _openslide_level *level,
+                       int32_t w, int32_t h,
+                       GError **err);
+  // must fail if osr->icc_profile_size doesn't match the profile
+  bool (*read_icc_profile)(openslide_t *osr, void *dest, GError **err);
   void (*destroy)(openslide_t *osr);
 };
 
@@ -293,18 +304,18 @@ void _openslide_cache_binding_destroy(struct _openslide_cache_binding *cb);
 
 // put and get
 void _openslide_cache_put(struct _openslide_cache_binding *cb,
-			  void *plane,  // coordinate plane (level or grid)
-			  int64_t x,
-			  int64_t y,
-			  void *data,
-			  uint64_t size_in_bytes,
-			  struct _openslide_cache_entry **entry);
+                          void *plane,  // coordinate plane (level or grid)
+                          int64_t x,
+                          int64_t y,
+                          void *data,
+                          uint64_t size_in_bytes,
+                          struct _openslide_cache_entry **entry);
 
 void *_openslide_cache_get(struct _openslide_cache_binding *cb,
-			   void *plane,
-			   int64_t x,
-			   int64_t y,
-			   struct _openslide_cache_entry **entry);
+                           void *plane,
+                           int64_t x,
+                           int64_t y,
+                           struct _openslide_cache_entry **entry);
 
 // value unref
 void _openslide_cache_entry_unref(struct _openslide_cache_entry *entry);
@@ -361,6 +372,9 @@ void _openslide_performance_warn_once(gint *warned_flag,
 #define _OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_Y "openslide.region[%d].y"
 #define _OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_WIDTH "openslide.region[%d].width"
 #define _OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_HEIGHT "openslide.region[%d].height"
+#define _OPENSLIDE_PROPERTY_NAME_TEMPLATE_ASSOCIATED_WIDTH "openslide.associated.%s.width"
+#define _OPENSLIDE_PROPERTY_NAME_TEMPLATE_ASSOCIATED_HEIGHT "openslide.associated.%s.height"
+#define _OPENSLIDE_PROPERTY_NAME_TEMPLATE_ASSOCIATED_ICC_SIZE "openslide.associated.%s.icc-size"
 
 /* Tables */
 // YCbCr -> RGB chroma contributions
@@ -394,6 +408,11 @@ extern const int16_t _openslide_B_Cb[256];
 #undef ftello
 #define fseeko _OPENSLIDE_POISON(_openslide_fseek_)
 #define ftello _OPENSLIDE_POISON(_openslide_ftell_)
+#endif
+
+#ifdef _WIN32
+// Prevent windows.h from defining the IN/OUT macro
+#define _NO_W32_PSEUDO_MODIFIERS
 #endif
 
 #endif

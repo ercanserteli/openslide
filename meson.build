@@ -68,39 +68,16 @@ add_project_link_arguments(
 )
 
 # fopen cloexec flag
-if host_machine.system() == 'windows'
+if host_machine.system() in ['dragonfly', 'freebsd', 'linux', 'netbsd', 'openbsd']
+  message('Using "e" flag for close-on-exec')
+  conf.set_quoted('FOPEN_CLOEXEC_FLAG', 'e')
+elif host_machine.system() == 'windows'
   message('Using "N" flag for close-on-exec (Windows)')
   conf.set_quoted('FOPEN_CLOEXEC_FLAG', 'N')
 else
-  code = '''
-  #include <stdio.h>
-  #include <unistd.h>
-  #include <fcntl.h>
-
-  int main(int argc, char **argv) {
-    FILE *fp = fopen("/dev/null", "re");
-    if (fp != NULL) {
-      int fd = fileno(fp);
-      if (fd != -1) {
-        long ret = fcntl(fd, F_GETFD);
-        if (ret != -1 && (ret & FD_CLOEXEC)) {
-          return 0;
-        }
-      }
-    }
-    return 1;
-  }
-  '''
-  result = cc.run(code, name : 'check fopen() close-on-exec flag')
-  if result.compiled() and result.returncode() == 0
-    # glibc >= 2.7, FreeBSD >= 10.0, NetBSD >= 6.0
-    message('Using "e" flag for close-on-exec')
-    conf.set_quoted('FOPEN_CLOEXEC_FLAG', 'e')
-  else
-    message('Using no close-on-exec flag (unknown or cross compile)')
-    conf.set_quoted('FOPEN_CLOEXEC_FLAG', '')
-    conf.set('NONATOMIC_CLOEXEC', 1)
-  endif
+  message('Using no close-on-exec flag (unknown)')
+  conf.set_quoted('FOPEN_CLOEXEC_FLAG', '')
+  conf.set('NONATOMIC_CLOEXEC', 1)
 endif
 if get_option('_nonatomic_cloexec')
   # CI sets this on Linux distros with libraries that don't correctly set
@@ -136,7 +113,7 @@ dicom_dep      = dependency(
   # avoid 'check' dependency
   default_options : ['tests=false'],
   fallback : ['libdicom', 'libdicom_dep'],
-  required : get_option('dicom'),
+  version : '>=1.0.0',
 )
 valgrind_dep   = dependency('valgrind', required : false)
 
@@ -147,10 +124,6 @@ doxygen = find_program(
 )
 
 # Dependency checks
-if dicom_dep.found()
-  conf.set('HAVE_LIBDICOM', 1)
-  feature_flags += 'dicom'
-endif
 if valgrind_dep.found()
   conf.set('HAVE_VALGRIND', 1)
 endif
@@ -211,6 +184,7 @@ if get_option('_sanitize')
     '-fsanitize=address',
     # UB sanitizer
     '-fsanitize=undefined',
+    '-fsanitize=float-divide-by-zero',
     '-fsanitize=unsigned-integer-overflow',
     '-fsanitize=implicit-conversion',
     '-fsanitize=local-bounds',
